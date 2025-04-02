@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stop Online</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f8ff;
+        margin: 0;
+        padding: 20px;
+        text-align: center;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      #game-screen {
+        display: none;
+      }
+      input,
+      button {
+        padding: 10px;
+        margin: 5px;
+        border-radius: 5px;
+        border: 1px solid #ccc;
+      }
+      button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-top: 15px;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      button:disabled {
+        background: #cccccc;
+      }
+      .letter {
+        font-size: 2em;
+        font-weight: bold;
+        color: #e74c3c;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background-color: #f2f2f2;
+      }
+      .game-info {
+        margin-bottom: 20px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 5px;
+      }
+      #results {
+        margin-top: 20px;
+        text-align: left;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 5px;
+      }
+      .host-buttons {
+        margin: 15px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🎮 STOP Online 🎯</h1>
+
+      <!-- Pantalla de Login -->
+      <div id="login-screen">
+        <h2>Unirse al Juego</h2>
+        <input type="text" id="player-name" placeholder="Tu nombre" required />
+        <input
+          type="text"
+          id="room-id"
+          placeholder="ID de sala (deja vacío para crear una)"
+        />
+        <button id="join-btn">Unirse/Crear Sala</button>
+      </div>
+
+      <!-- Pantalla de Juego -->
+      <div id="game-screen">
+        <div class="game-info">
+          <p><strong>Sala:</strong> <span id="current-room"></span></p>
+          <p><strong>Jugadores:</strong> <span id="players-list"></span></p>
+          <p>
+            <strong>Letra actual:</strong>
+            <span id="current-letter" class="letter">?</span>
+          </p>
+        </div>
+
+        <div class="host-buttons">
+          <button id="start-game-btn" style="display: none">
+            Comenzar Juego
+          </button>
+          <button id="next-round-btn" style="display: none">
+            Siguiente Ronda
+          </button>
+        </div>
+
+        <table id="categories-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Respuesta</th>
+            </tr>
+          </thead>
+          <tbody id="categories-body"></tbody>
+        </table>
+
+        <button id="stop-button" disabled>¡STOP!</button>
+        <div id="results"></div>
+      </div>
+    </div>
+
+    <!-- Script principal -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+      import {
+        getDatabase,
+        ref,
+        update,
+        onValue,
+        serverTimestamp,
+        get,
+      } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyA2KtBUox9IiB1_jw84D6k2T3tT7Uw_7W4",
+        authDomain: "stop-2aeb8.firebaseapp.com",
+        databaseURL: "https://stop-2aeb8-default-rtdb.firebaseio.com",
+        projectId: "stop-2aeb8",
+        storageBucket: "stop-2aeb8.appspot.com",
+        messagingSenderId: "642332040800",
+        appId: "1:642332040800:web:21ee61ebd4844ac2ba2d05",
+        measurementId: "G-ZE366Z7K94",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const db = getDatabase(app);
+
+      let playerName = "";
+      let roomId = "";
+      let currentLetter = "";
+      let isHost = false;
+      const categories = ["Nombre", "Animal", "Color", "Ciudad", "Fruta"];
+
+      const loginScreen = document.getElementById("login-screen");
+      const gameScreen = document.getElementById("game-screen");
+      const playerNameInput = document.getElementById("player-name");
+      const roomIdInput = document.getElementById("room-id");
+      const currentRoomSpan = document.getElementById("current-room");
+      const playersListSpan = document.getElementById("players-list");
+      const currentLetterSpan = document.getElementById("current-letter");
+      const categoriesBody = document.getElementById("categories-body");
+      const stopButton = document.getElementById("stop-button");
+      const resultsDiv = document.getElementById("results");
+      const startGameBtn = document.getElementById("start-game-btn");
+      const nextRoundBtn = document.getElementById("next-round-btn");
+
+      async function joinRoom() {
+        playerName = playerNameInput.value.trim();
+        roomId = roomIdInput.value.trim();
+
+        if (!playerName) {
+          alert("¡Ingresa tu nombre!");
+          return;
+        }
+
+        if (!roomId) {
+  roomId = Math.floor(Math.random() * 1000000).toString(); // ej. 6 dígitos
+}
+
+// Verificamos si ya existe la sala
+const roomSnapshot = await get(ref(db, `rooms/${roomId}`));
+if (!roomSnapshot.exists()) {
+  isHost = true; // El primer jugador será host
+}
+
+
+        const playerData = {
+          name: playerName,
+          ready: false,
+          answers: {},
+          score: 0,
+          isHost: isHost,
+          joinedAt: serverTimestamp(),
+        };
+
+        const updates = {};
+        updates[`rooms/${roomId}/players/${playerName}`] = playerData;
+
+        if (isHost) {
+          updates[`rooms/${roomId}/metadata`] = {
+            createdAt: serverTimestamp(),
+            currentLetter: "?",
+            gameState: "waiting",
+          };
+        }
+
+        await update(ref(db), updates);
+
+        showGameScreen();
+        setupRoomListeners();
+        if (isHost) startGameBtn.style.display = "block";
+      }
+
+      function setupRoomListeners() {
+        const playersRef = ref(db, `rooms/${roomId}/players`);
+        const metadataRef = ref(db, `rooms/${roomId}/metadata`);
+
+        onValue(playersRef, (snapshot) => {
+          const players = snapshot.val() || {};
+          playersListSpan.textContent = Object.keys(players).join(", ");
+
+          // Verifica si el jugador actual es host desde Firebase
+          const thisPlayer = players[playerName];
+          isHost = thisPlayer?.isHost || false;
+
+          // Mostrar botón si es host
+          if (isHost) startGameBtn.style.display = "block";
+        });
+
+        onValue(metadataRef, (snapshot) => {
+          const metadata = snapshot.val() || {};
+          currentLetter = metadata.currentLetter || "?";
+          currentLetterSpan.textContent = currentLetter;
+
+          if (metadata.gameState === "playing" && currentLetter !== "?") {
+            fillCategoriesTable();
+            stopButton.disabled = false;
+          } else if (metadata.gameState === "scoring") {
+            showResults();
+          }
+        });
+      }
+
+      function fillCategoriesTable() {
+        categoriesBody.innerHTML = "";
+        categories.forEach((category) => {
+          const row = document.createElement("tr");
+          const cellCategory = document.createElement("td");
+          const cellInput = document.createElement("td");
+
+          cellCategory.textContent = category;
+          cellInput.innerHTML = `<input type="text" id="${category.toLowerCase()}" placeholder="${currentLetter}..." oninput="validateInput(this, '${currentLetter}')">`;
+
+          row.appendChild(cellCategory);
+          row.appendChild(cellInput);
+          categoriesBody.appendChild(row);
+        });
+      }
+
+      window.validateInput = function (input, letter) {
+        const value = input.value.trim();
+        if (value && !value.toLowerCase().startsWith(letter.toLowerCase())) {
+          input.style.border = "2px solid red";
+          return false;
+        } else {
+          input.style.border = "";
+          return true;
+        }
+      };
+
+      async function submitAnswers() {
+        const answers = {};
+        let allValid = true;
+
+        categories.forEach((category) => {
+          const input = document.getElementById(category.toLowerCase());
+          const answer = input.value.trim();
+
+          if (!validateInput(input, currentLetter)) {
+            allValid = false;
+          } else {
+            answers[category] = answer;
+          }
+        });
+
+        if (!allValid) {
+          alert(`¡Todas las respuestas deben comenzar con "${currentLetter}"!`);
+          return;
+        }
+
+        await update(ref(db, `rooms/${roomId}/players/${playerName}`), {
+          answers,
+          ready: true,
+        });
+
+        stopButton.disabled = true;
+        checkAllPlayersReady();
+      }
+
+      async function checkAllPlayersReady() {
+        const snapshot = await get(ref(db, `rooms/${roomId}/players`));
+        const players = snapshot.val() || {};
+        const allReady = Object.values(players).every((p) => p.ready);
+
+        if (allReady) calculateScores();
+      }
+
+      async function calculateScores() {
+        const roomSnapshot = await get(ref(db, `rooms/${roomId}`));
+        const roomData = roomSnapshot.val();
+        const players = roomData.players;
+        const allAnswers = {};
+        const updates = {};
+
+        Object.keys(players).forEach((name) => {
+          if (players[name].ready) allAnswers[name] = players[name].answers;
+        });
+
+        Object.keys(allAnswers).forEach((name) => {
+          let score = 0;
+          categories.forEach((cat) => {
+            const ans = allAnswers[name][cat];
+            if (isUniqueAnswer(ans, cat, allAnswers)) score += 10;
+            else if (ans) score += 5;
+          });
+          updates[`rooms/${roomId}/players/${name}/score`] =
+            (players[name].score || 0) + score;
+          updates[`rooms/${roomId}/players/${name}/roundScore`] = score;
+        });
+
+        updates[`rooms/${roomId}/metadata/gameState`] = "scoring";
+        await update(ref(db), updates);
+      }
+
+      function isUniqueAnswer(answer, category, allAnswers) {
+        if (!answer) return false;
+        let count = 0;
+        Object.values(allAnswers).forEach((answers) => {
+          if (answers[category]?.toLowerCase() === answer.toLowerCase())
+            count++;
+        });
+        return count === 1;
+      }
+
+      async function showResults() {
+        const snapshot = await get(ref(db, `rooms/${roomId}/players`));
+        const players = snapshot.val() || {};
+        const sorted = Object.keys(players).sort(
+          (a, b) => (players[b].score || 0) - (players[a].score || 0)
+        );
+
+        let html = "<h3>Resultados:</h3><ul>";
+        sorted.forEach((name) => {
+          html += `<li><strong>${name}</strong>: ${
+            players[name].roundScore || 0
+          } puntos (Total: ${players[name].score || 0})</li>`;
+        });
+        html += "</ul>";
+        resultsDiv.innerHTML = html;
+
+        if (isHost) nextRoundBtn.style.display = "block";
+      }
+
+      async function startNewRound() {
+        const letter = getRandomLetter();
+        const updates = {
+          [`rooms/${roomId}/metadata/currentLetter`]: letter,
+          [`rooms/${roomId}/metadata/gameState`]: "playing",
+        };
+
+        const snapshot = await get(ref(db, `rooms/${roomId}/players`));
+        const players = snapshot.val() || {};
+
+        Object.keys(players).forEach((name) => {
+          updates[`rooms/${roomId}/players/${name}/ready`] = false;
+          updates[`rooms/${roomId}/players/${name}/answers`] = {};
+          updates[`rooms/${roomId}/players/${name}/roundScore`] = 0;
+        });
+
+        await update(ref(db), updates);
+        resultsDiv.innerHTML = "";
+        nextRoundBtn.style.display = "none";
+      }
+
+      function getRandomLetter() {
+        const letters = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
+        return letters.charAt(Math.floor(Math.random() * letters.length));
+      }
+
+      function showGameScreen() {
+        loginScreen.style.display = "none";
+        gameScreen.style.display = "block";
+        currentRoomSpan.textContent = roomId;
+      }
+
+      // Event listeners
+      document.getElementById("join-btn").addEventListener("click", joinRoom);
+      stopButton.addEventListener("click", submitAnswers);
+      startGameBtn.addEventListener("click", startNewRound);
+      nextRoundBtn.addEventListener("click", startNewRound);
+    </script>
+  </body>
+</html>
