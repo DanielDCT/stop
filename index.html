@@ -82,7 +82,6 @@
   <div class="container">
     <h1>🎮 STOP Online 🎯</h1>
 
-    <!-- Pantalla de Login -->
     <div id="login-screen">
       <h2>Unirse al Juego</h2>
       <input type="text" id="player-name" placeholder="Tu nombre" required />
@@ -90,7 +89,6 @@
       <button id="join-btn">Unirse/Crear Sala</button>
     </div>
 
-    <!-- Pantalla de Juego -->
     <div id="game-screen">
       <div class="game-info">
         <p><strong>Sala:</strong> <span id="current-room"></span></p>
@@ -105,10 +103,7 @@
 
       <table id="categories-table">
         <thead>
-          <tr>
-            <th>Categoría</th>
-            <th>Respuesta</th>
-          </tr>
+          <tr><th>Categoría</th><th>Respuesta</th></tr>
         </thead>
         <tbody id="categories-body"></tbody>
       </table>
@@ -118,11 +113,10 @@
     </div>
   </div>
 
-  <!-- Firebase Compat SDK -->
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 
-  <!-- Script Principal -->
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyA2KtBUox9IiB1_jw84D6k2T3tT7Uw_7W4",
@@ -167,7 +161,6 @@
     async function joinRoom() {
       playerName = playerNameInput.value.trim();
       roomId = roomIdInput.value.trim() || Math.floor(Math.random() * 100000).toString();
-
       if (!playerName) return alert("¡Ingresa tu nombre!");
 
       const roomSnapshot = await db.ref(`rooms/${roomId}`).get();
@@ -201,12 +194,11 @@
       db.ref(`rooms/${roomId}/players`).on("value", (snap) => {
         const players = snap.val() || {};
         playersListSpan.textContent = Object.keys(players).join(", ");
-        const me = players[playerName];
-        isHost = me?.isHost || false;
+        isHost = players[playerName]?.isHost || false;
         if (isHost) startGameBtn.style.display = "block";
       });
 
-      db.ref(`rooms/${roomId}/metadata`).on("value", (snap) => {
+      db.ref(`rooms/${roomId}/metadata`).on("value", async (snap) => {
         const metadata = snap.val() || {};
         currentLetter = metadata.currentLetter || "?";
         currentLetterSpan.textContent = currentLetter;
@@ -214,7 +206,15 @@
         if (metadata.gameState === "playing" && currentLetter !== "?") {
           fillCategoriesTable();
           stopButton.disabled = false;
-        } else if (metadata.gameState === "scoring") {
+        }
+
+        if (metadata.gameState === "scoring") {
+          stopButton.disabled = true;
+          disableAllInputs();
+          if (isHost) {
+            const snapPlayers = await db.ref(`rooms/${roomId}/players`).get();
+            calculateScores(snapPlayers.val());
+          }
           showResults();
         }
       });
@@ -229,6 +229,10 @@
             <td><input id="${cat.toLowerCase()}" placeholder="${currentLetter}..." oninput="validateInput(this, '${currentLetter}')"></td>
           </tr>`;
       });
+    }
+
+    function disableAllInputs() {
+      document.querySelectorAll("#categories-body input").forEach(input => input.disabled = true);
     }
 
     window.validateInput = function(input, letter) {
@@ -250,23 +254,18 @@
 
       if (!allValid) return alert(`¡Todas las respuestas deben comenzar con "${currentLetter}"!`);
 
-      await db.ref(`rooms/${roomId}/players/${playerName}`).update({
-        answers, ready: true
+      await db.ref(`rooms/${roomId}/players/${playerName}`).update({ answers, ready: true });
+      await db.ref(`rooms/${roomId}/metadata`).update({
+        gameState: "scoring",
+        stopper: playerName
       });
 
       stopButton.disabled = true;
-      checkAllPlayersReady();
-    }
-
-    async function checkAllPlayersReady() {
-      const snapshot = await db.ref(`rooms/${roomId}/players`).get();
-      const players = snapshot.val() || {};
-      if (Object.values(players).every(p => p.ready)) calculateScores(players);
+      disableAllInputs();
     }
 
     async function calculateScores(players) {
-      const allAnswers = {};
-      const updates = {};
+      const allAnswers = {}, updates = {};
 
       Object.entries(players).forEach(([name, data]) => {
         if (data.ready) allAnswers[name] = data.answers;
@@ -297,7 +296,8 @@
       const sorted = Object.entries(players).sort(([, a], [, b]) => (b.score || 0) - (a.score || 0));
 
       resultsDiv.innerHTML = `<h3>Resultados:</h3><ul>${
-        sorted.map(([name, data]) => `<li><strong>${name}</strong>: ${data.roundScore || 0} puntos (Total: ${data.score || 0})</li>`).join("")
+        sorted.map(([name, data]) =>
+          `<li><strong>${name}</strong>: ${data.roundScore || 0} puntos (Total: ${data.score || 0})</li>`).join("")
       }</ul>`;
 
       if (isHost) nextRoundBtn.style.display = "block";
